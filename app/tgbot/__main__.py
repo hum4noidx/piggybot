@@ -1,26 +1,25 @@
 import asyncio
 import logging
 
+import sentry_sdk
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage, SimpleEventIsolation
 from aiogram.fsm.storage.redis import RedisStorage, DefaultKeyBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
-from aiogram_dialog import DialogRegistry
 from aiohttp import web
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
-from app.tgbot.handlers.setup import register_handlers
-from app.tgbot.middlewares.db import DbSessionMiddleware
-from app.tgbot.services.set_commands import set_commands
+from tgbot.handlers.setup import register_handlers, register_middlewares
+from tgbot.services.set_commands import set_commands
 from configreader import config
-from tgbot.middlewares.maintenance import MaintenanceMiddleware
-from tgbot.middlewares.throttling import ThrottlingMiddleware
+from infrastructure.database.create_tables import create_tables
 
 logger = logging.getLogger(__name__)
 
 
 async def main():
+    # Logging config
     if config.environment == 'PRODUCTION':
 
         logging.basicConfig(
@@ -29,13 +28,33 @@ async def main():
             level=logging.INFO,
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         )
+        sentry_sdk.init(
+            dsn="https://0009f711148a4590832960617c24a153@o4504446107058176.ingest.sentry.io/4504514640936960",
+
+            # Set traces_sample_rate to 1.0 to capture 100%
+            # of transactions for performance monitoring.
+            # We recommend adjusting this value in production.
+            traces_sample_rate=1.0,
+            environment='production'
+        )
     else:
         logging.basicConfig(
+            filename='bot_webhook_dev.log',
+            filemode='a',
             level=logging.INFO,
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         )
+        sentry_sdk.init(
+            dsn="https://0009f711148a4590832960617c24a153@o4504446107058176.ingest.sentry.io/4504514640936960",
 
-    if config.redis_dsn:
+            # Set traces_sample_rate to 1.0 to capture 100%
+            # of transactions for performance monitoring.
+            # We recommend adjusting this value in production.
+            traces_sample_rate=1.0,
+            environment='development'
+        )
+
+    if config.redis_dsn.startswith('redis://'):
         storage = RedisStorage.from_url(config.redis_dsn,
                                         key_builder=DefaultKeyBuilder(prefix='shop_bot', with_destiny=True))
     else:
@@ -44,27 +63,21 @@ async def main():
     # Creating DB connections pool
     engine = create_async_engine(config.postgres_dsn, future=True)
     db_pool = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    await create_tables(engine)
+
     logging.debug('DB successfully initialized')
 
     bot = Bot(token=config.bot_token, parse_mode="HTML")
     dp = Dispatcher(storage=storage, events_isolation=SimpleEventIsolation())
-    dialog_registry = DialogRegistry(dp)
 
-    # Register middlewares
-
-    dp.callback_query.middleware(DbSessionMiddleware(db_pool))
-    dp.inline_query.middleware(DbSessionMiddleware(db_pool))
-    dp.message.middleware(MaintenanceMiddleware())
-    dp.callback_query.middleware(MaintenanceMiddleware())
-    dp.message.middleware(ThrottlingMiddleware())
-    dp.callback_query.middleware(ThrottlingMiddleware())
-
-    register_handlers(dp=dp, dialog_registry=dialog_registry)
+    register_middlewares(dp, db_pool)
+    # Register handlers
+    dialog_registry = register_handlers(dp=dp)
     try:
 
-        if not config.webhook_domain:
-
+        if not config.webhook_domain.startswith('https://'):
             await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+            logger.info(config.json())
         else:
             # Suppress aiohttp access log completely
             aiohttp_logger = logging.getLogger("aiohttp.access")

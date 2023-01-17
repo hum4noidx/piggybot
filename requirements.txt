@@ -10,3 +10,4 @@ redis==4.3.4
 SQLAlchemy==1.4.40
 psutil~=5.9.3
 cachetools~=4.2.4
+sentry_sdk
