@@ -48,6 +48,6 @@ jobs:
             docker login -u ${{ github.repository_owner }} -p ${{ secrets.TOKEN }} ghcr.io
             docker stop piggybot
             docker rm piggybot
-            docker images -a | grep "piggybot" | awk '{print $3}' | xargs docker rmi
             docker pull ghcr.io/${{ github.repository_owner }}/piggybot:latest
             docker run -e BOT_TOKEN=${{ secrets.BOT_TOKEN }} -e POSTGRES_DSN=${{ secrets.POSTGRES_DSN }} -e REDIS_DSN=${{ secrets.REDIS_DSN }} -e APP_HOST=${{ secrets.APP_HOST }} -e APP_PORT=${{ secrets.APP_PORT }} -e WEBHOOK_DOMAIN=${{ secrets.WEBHOOK_DOMAIN }} -e WEBHOOK_PATH=${{ secrets.WEBHOOK_PATH }} -e ENVIRONMENT=${{ secrets.ENVIRONMENT }} -e SERVICE_NAME=${{ secrets.SERVICE_NAME }} -d --name piggybot ghcr.io/${{ github.repository_owner }}/piggybot:latest
+            docker image prune -f
